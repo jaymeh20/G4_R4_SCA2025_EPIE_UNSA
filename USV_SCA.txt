@@ -1,0 +1,92 @@
+function [eta, nu] = USV_EDSONJ_tau(tau, eta_k, nu_k)
+%#codegen
+% Planta USV 3-DOF (Fossen-like) con integración interna simple.
+% Entradas:
+%   tau : [3x1] = [X; Y; N]  (SI NO USAS Y, ENVÍA 0)
+% Salidas:
+%   eta : [x; y; psi]
+%   nu  : [u; v; r]
+
+% -------- Paso fijo interno (edítalo si quieres) -------------
+DT = 0.01;   % [s] paso de integración interno (fijo)
+
+% % -------- Estados persistentes -------------------------------
+% persistent eta_k nu_k
+% if isempty(eta_k)
+%     eta_k = [x;y;psi];
+%     nu_k  = [u;v;r];
+% end
+
+% -------- Asegurar tamaño de entrada tau ---------------------
+% (Evita tamaños variables; Simulink requiere fijos)
+% Esperamos SIEMPRE [3x1]. Si llega algo distinto, lo forzamos a cero.
+if ~isequal(size(tau), [3,1])
+    tau = zeros(3,1);
+end
+X = tau(1);  Y = tau(2);  N = tau(3);
+
+% -------- Parámetros (ajústalos a tu EDSON-J) ----------------
+m  = 35.0;     % [kg]
+Iz = 6.0;      % [kg m^2]
+xg = 0.00;     % [m]
+
+% Masa añadida (diagonal con signo estándar M_A = -diag(...))
+Xu_dot =  2.0;   % [kg]
+Yv_dot = 10.0;   % [kg]
+Nr_dot =  1.5;   % [kg m^2]
+
+% Amortiguamientos (lineal + cuadrático)
+Du  = 20.0;  Du2 =  4.0;     % surge
+Dv  = 60.0;  Dv2 = 12.0;     % sway
+Dr  =  8.0;  Dr2 =  2.0;     % yaw
+
+% -------- Matrices M, C, D -----------------------------------
+% Inercia rígida
+MRB = [ m,   0,      0;
+        0,   m,   m*xg;
+        0, m*xg,   Iz ];
+
+% Masa añadida
+MA  = -diag([Xu_dot, Yv_dot, Nr_dot]);
+
+% Inercia total
+M = MRB + MA;
+
+% Coriolis rígido (C_RB)
+u = nu_k(1); v = nu_k(2); r = nu_k(3);
+CRB = [  0,      0,    -m*(xg*r + v);
+         0,      0,     m*u;
+         m*(xg*r + v), -m*u,  0 ];
+
+% Coriolis añadida (C_A) con MA diagonal
+c13 = -(Yv_dot*v + Nr_dot*r);
+c23 =  (Xu_dot*u);
+CA  = [ 0,  0,  c13;
+        0,  0,  c23;
+       -c13, -c23, 0 ];
+
+C = CRB + CA;
+
+% Amortiguamiento (lin + cuad)
+D = diag([ Du + Du2*abs(u), ...
+           Dv + Dv2*abs(v), ...
+           Dr + Dr2*abs(r) ]);
+
+% -------- Dinámica: M*nu_dot = tau - C*nu - D*nu -------------
+nu_dot  = M \ ([X;Y;N] - C*nu_k - D*nu_k);
+%nu_next = nu_k + DT * nu_dot;
+
+% -------- Cinemática: eta_dot = J(psi)*nu --------------------
+psi = eta_k(3);
+J = [ cos(psi), -sin(psi), 0;
+      sin(psi),  cos(psi), 0;
+           0  ,       0  , 1 ];
+eta_dot  = J * nu_k;
+%eta_next = eta_k + DT * eta_dot;
+
+% -------- Salidas y actualización ----------------------------
+eta = eta_dot;
+nu  = nu_dot;
+% eta_k = eta_dot;
+% nu_k  = nu_dot;
+end
